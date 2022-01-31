@@ -18,13 +18,15 @@ contract TreasuryBuyBacks is Ownable {
 
   mapping(address => bool) public admins;
 
-  constructor(address _treasuryFund, address _peg, address _native, IUniswapV2Router _router) public {
+  constructor(address _treasuryFund, address _peg, address _native, address _router) public {
     treasuryFund = _treasuryFund;
     peg = IERC20(_peg);
     native = IERC20(_native);
-    router = _router;
+    router = IUniswapV2Router(_router);
     toNative = [_peg, _native];
     toPeg = [_native, _peg];
+    peg.approve(_router, type(uint256).max);
+    native.approve(_router, type(uint256).max);
   }
 
   modifier onlyAdmin() {
