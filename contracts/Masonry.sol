@@ -214,6 +214,16 @@ contract Masonry is ShareWrapper, ContractGuard {
         emit Withdrawn(msg.sender, amount);
     }
 
+    function emergencyWithdraw() external onlyOneBlock masonExists updateReward(msg.sender) {
+        uint256 amount = balanceOf(msg.sender);
+        require(amount > 0, "Masonry: Cannot withdraw 0");
+        require(masons[msg.sender].epochTimerStart.add(withdrawLockupEpochs) <= treasury.epoch(), "Masonry: still in withdraw lockup");
+        super.withdraw(amount);
+        masons[msg.sender].epochTimerStart = treasury.epoch(); // reset timer
+        masons[msg.sender].rewardEarned = 0; // reset rewards
+        emit Withdrawn(msg.sender, amount);
+    }
+
     function exit() external {
         withdraw(balanceOf(msg.sender));
     }
