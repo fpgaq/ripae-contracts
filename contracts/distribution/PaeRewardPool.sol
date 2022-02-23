@@ -26,6 +26,7 @@ contract PaeRewardPool {
         uint256 lastRewardTime; // Last time that PAEs distribution occurs.
         uint256 accPaePerShare; // Accumulated PAEs per share, times 1e18. See below.
         bool isStarted; // if lastRewardTime has passed
+        uint256 depositFee; // deposit fee, x / 10000, 2% max
     }
 
     IERC20 public pae;
@@ -49,6 +50,10 @@ contract PaeRewardPool {
     uint256 public runningTime = 365 days;
     uint256 public constant TOTAL_REWARDS = 170000 ether;
 
+    uint256 constant MAX_DEPOSIT_FEE = 200; // 2%
+
+    address public treasuryFund;
+
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -56,13 +61,15 @@ contract PaeRewardPool {
 
     constructor(
         address _pae,
-        uint256 _poolStartTime
+        uint256 _poolStartTime,
+        address _treasuryFund
     ) public {
         require(block.timestamp < _poolStartTime, "late");
         if (_pae != address(0)) pae = IERC20(_pae);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
         operator = msg.sender;
+        treasuryFund = _treasuryFund;
     }
 
     modifier onlyOperator() {
@@ -82,8 +89,10 @@ contract PaeRewardPool {
         uint256 _allocPoint,
         IERC20 _token,
         bool _withUpdate,
-        uint256 _lastRewardTime
+        uint256 _lastRewardTime,
+        uint256 _depositFee
     ) public onlyOperator {
+        require(_depositFee <= MAX_DEPOSIT_FEE, "deposit fee too high");
         checkPoolDuplicate(_token);
         if (_withUpdate) {
             massUpdatePools();
@@ -111,7 +120,8 @@ contract PaeRewardPool {
             allocPoint : _allocPoint,
             lastRewardTime : _lastRewardTime,
             accPaePerShare : 0,
-            isStarted : _isStarted
+            isStarted : _isStarted,
+            depositFee: _depositFee
             }));
         if (_isStarted) {
             totalAllocPoint = totalAllocPoint.add(_allocPoint);
@@ -119,7 +129,8 @@ contract PaeRewardPool {
     }
 
     // Update the given pool's PAE allocation point. Can only be called by the owner.
-    function set(uint256 _pid, uint256 _allocPoint) public onlyOperator {
+    function set(uint256 _pid, uint256 _allocPoint, uint256 _depositFee) public onlyOperator {
+        require(_depositFee <= MAX_DEPOSIT_FEE, "deposit fee too high");
         massUpdatePools();
         PoolInfo storage pool = poolInfo[_pid];
         if (pool.isStarted) {
@@ -128,6 +139,7 @@ contract PaeRewardPool {
             );
         }
         pool.allocPoint = _allocPoint;
+        pool.depositFee = _depositFee;
     }
 
     // Return accumulate rewards over the given _from to _to block.
@@ -191,23 +203,31 @@ contract PaeRewardPool {
 
     // Deposit LP tokens.
     function deposit(uint256 _pid, uint256 _amount) public {
-        address _sender = msg.sender;
+        deposit(msg.sender, _pid, _amount);
+    }
+
+    function deposit(address _to, uint256 _pid, uint256 _amount) public {
+        address _from = msg.sender;
         PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][_sender];
+        UserInfo storage user = userInfo[_pid][_to];
         updatePool(_pid);
         if (user.amount > 0) {
             uint256 _pending = user.amount.mul(pool.accPaePerShare).div(1e18).sub(user.rewardDebt);
             if (_pending > 0) {
-                safePaeTransfer(_sender, _pending);
-                emit RewardPaid(_sender, _pending);
+                safePaeTransfer(_to, _pending);
+                emit RewardPaid(_to, _pending);
             }
         }
         if (_amount > 0) {
-            pool.token.safeTransferFrom(_sender, address(this), _amount);
-            user.amount = user.amount.add(_amount);
+            pool.token.safeTransferFrom(_from, address(this), _amount);
+            uint256 depositFee = _amount.mul(pool.depositFee).div(10000);
+            user.amount = user.amount.add(_amount.sub(depositFee));
+            if (depositFee > 0) {
+                pool.token.safeTransfer(treasuryFund, depositFee);
+            }
         }
         user.rewardDebt = user.amount.mul(pool.accPaePerShare).div(1e18);
-        emit Deposit(_sender, _pid, _amount);
+        emit Deposit(_to, _pid, _amount);
     }
 
     // Withdraw LP tokens.
@@ -255,6 +275,11 @@ contract PaeRewardPool {
 
     function setOperator(address _operator) external onlyOperator {
         operator = _operator;
+    }
+
+    function setTreasuryFund(address _treasuryFund) external {
+        require(msg.sender == _treasuryFund, "!treasury");
+        treasuryFund = _treasuryFund;
     }
 
     function governanceRecoverUnsupported(IERC20 _token, uint256 amount, address to) external onlyOperator {
