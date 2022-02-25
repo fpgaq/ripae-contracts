@@ -52,7 +52,7 @@ contract Pae is ERC20Burnable, Operator {
     }
 
     function setTreasuryFund(address _treasuryFund) external {
-        require(msg.sender == _treasuryFund, "!treasury");
+        require(msg.sender == treasuryFund, "!treasury");
         treasuryFund = _treasuryFund;
     }
 

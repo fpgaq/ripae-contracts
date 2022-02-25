@@ -273,7 +273,7 @@ contract GenesisRewardPool {
     }
 
     function setTreasuryFund(address _treasuryFund) external {
-        require(msg.sender == _treasuryFund, "!treasury");
+        require(msg.sender == treasuryFund, "!treasury");
         treasuryFund = _treasuryFund;
     }
 
